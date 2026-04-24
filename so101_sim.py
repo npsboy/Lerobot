@@ -188,18 +188,10 @@ class SO101Simulator:
         self.base_marker      = self.ax.scatter([0], [0], s=180, zorder=5, color="black")
 
         self.included_arcs: list[Arc] = []
-        self.arc_labels = []
         for _ in range(3):
             arc = Arc((0, 0), 0.1, 0.1, theta1=0, theta2=1, lw=2.5, color="#9467bd")
             self.ax.add_patch(arc)
             self.included_arcs.append(arc)
-            lbl = self.ax.text(
-                0, 0, "",
-                fontsize=11, family="monospace", color="#7040a0",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
-                          alpha=0.88, edgecolor="none"),
-            )
-            self.arc_labels.append(lbl)
 
         self.ax.set_title("SO101 2D Simple Simulator  (real joint limits)", fontsize=14)
         self.ax.set_xlabel("X (projected)", fontsize=12)
@@ -268,15 +260,20 @@ class SO101Simulator:
 
     def fk(self) -> tuple[np.ndarray, np.ndarray, float]:
         angles = [self._jdeg(i) for i in [1, 2, 3]]
-        segs   = [angles[0], angles[1], angles[2], 0.0]
-        cum    = math.radians(180.0)
-        xs, ys = [0.0], [0.0]
-        x = y = 0.0
-        for L, a in zip(self.link_lengths, segs):
+        
+        # Start with a fixed vertical base
+        L0 = self.link_lengths[0]
+        xs, ys = [0.0, 0.0], [0.0, L0]
+        x, y = 0.0, L0
+        
+        segs = [angles[0], angles[1], angles[2]]
+        cum  = math.radians(180.0)
+        for L, a in zip(self.link_lengths[1:], segs):
             cum -= math.radians(a)
             x   += L * math.cos(cum)
             y   += L * math.sin(cum)
             xs.append(x); ys.append(y)
+            
         pan = math.radians(-self._jdeg(0))
         xs  = [px * math.cos(pan) for px in xs]
         return np.array(xs), np.array(ys), pan
@@ -312,9 +309,9 @@ class SO101Simulator:
         # Angle computation
         bref  = np.array([1.0, 0.0])
         specs = [
-            (bref,       svecs[0]),
-            (-svecs[0],  svecs[1]),
+            (bref,       svecs[1]),
             (-svecs[1],  svecs[2]),
+            (-svecs[2],  svecs[3]),
         ]
         jang = [self._signed_angle(a, b) for a, b in specs]
         # clamp 0 / 180
@@ -328,15 +325,13 @@ class SO101Simulator:
 
         arc_r = max(0.18, min(self.link_lengths) * 0.28)
         arc_specs = [
-            (0, self._vang(bref),       jang[0],  "shoulder_lift"),
-            (1, self._vang(-svecs[0]),  jang[1],  "elbow_flex"),
-            (2, self._vang(-svecs[1]), -jang[2],  "wrist_flex"),
+            (1, self._vang(bref),       jang[0],  "shoulder_lift"),
+            (2, self._vang(-svecs[1]),  jang[1],  "elbow_flex"),
+            (3, self._vang(-svecs[2]), -jang[2],  "wrist_flex"),
         ]
         for ai, (ci, tf, delta, name) in enumerate(arc_specs):
             center = np.array([xs[ci], ys[ci]])
-            lp = self._set_arc(self.included_arcs[ai], center, tf, delta, arc_r)
-            self.arc_labels[ai].set_position((float(lp[0]), float(lp[1])))
-            self.arc_labels[ai].set_text(f"{name}\n{self._fmt(jdisp[ai+1])}")
+            self._set_arc(self.included_arcs[ai], center, tf, delta, arc_r)
 
         # ── sidebar info text ──────────────────────────────────────────────────
         sel_name = self.joint_names[self.selected_joint]
