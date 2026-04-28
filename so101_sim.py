@@ -188,11 +188,22 @@ class SO101Simulator:
         self.base_marker      = self.ax.scatter([0], [0], s=180, zorder=5, color="black")
 
         self.included_arcs: list[Arc] = []
+        self.arc_labels: list[plt.Text] = []
         for _ in range(3):
             arc = Arc((0, 0), 0.1, 0.1, theta1=0, theta2=1, lw=2.5, color="#9467bd")
             self.ax.add_patch(arc)
             self.included_arcs.append(arc)
-
+            label = self.ax.text(
+                0.0,
+                0.0,
+                "",
+                fontsize=9,
+                ha="center",
+                va="bottom",
+                color="#5b3f8c",
+                family="monospace",
+            )
+            self.arc_labels.append(label)
         self.ax.set_title("SO101 2D Simple Simulator  (real joint limits)", fontsize=14)
         self.ax.set_xlabel("X (projected)", fontsize=12)
         self.ax.set_ylabel("Y", fontsize=12)
@@ -331,7 +342,12 @@ class SO101Simulator:
         ]
         for ai, (ci, tf, delta, name) in enumerate(arc_specs):
             center = np.array([xs[ci], ys[ci]])
-            self._set_arc(self.included_arcs[ai], center, tf, delta, arc_r)
+            lp = self._set_arc(self.included_arcs[ai], center, tf, delta, arc_r)
+            is_selected = self.selected_joint == ai + 1
+            self.arc_labels[ai].set_visible(is_selected)
+            if is_selected:
+                self.arc_labels[ai].set_position((float(lp[0]), float(lp[1])))
+                self.arc_labels[ai].set_text(f"{name}\n{self._fmt(jdisp[ai+1])}")
 
         # ── sidebar info text ──────────────────────────────────────────────────
         sel_name = self.joint_names[self.selected_joint]
