@@ -49,13 +49,21 @@ DEFAULT_LINK_LENGTHS = [1.00, 0.90, 0.65, 0.28]
 LINK_NAMES           = ["Base", "Upper arm", "Forearm", "Wrist"]
 LINK_MIN, LINK_MAX   = 0.05, 3.0
 
+MIN_DEGREE_OFFSETS = {
+    "shoulder_pan": 0.0,
+    "shoulder_lift": -10.0,
+    "elbow_flex": -10.0,
+    "wrist_flex": 80.0,
+}
 
-def degrees_to_ticks(degrees: float, lo: float, hi: float) -> int:
-    return int(round(degrees * 10 + lo))
+def degrees_to_ticks(degrees: float, lo: float, hi: float, joint_name: str = "") -> int:
+    offset = MIN_DEGREE_OFFSETS.get(joint_name, 0.0)
+    return int(round((degrees - offset) * 10 + lo))
 
 
-def ticks_to_degrees(ticks: float, lo: float, hi: float) -> float:
-    return (ticks - lo) / 10.0
+def ticks_to_degrees(ticks: float, lo: float, hi: float, joint_name: str = "") -> float:
+    offset = MIN_DEGREE_OFFSETS.get(joint_name, 0.0)
+    return (ticks - lo) / 10.0 + offset
 
 
 class SO101Simulator:
@@ -228,7 +236,7 @@ class SO101Simulator:
         self.draw()
 
     def _jdeg(self, idx: int) -> float:
-        return ticks_to_degrees(self.raw_positions[idx], self.range_min[idx], self.range_max[idx])
+        return ticks_to_degrees(self.raw_positions[idx], self.range_min[idx], self.range_max[idx], self.joint_names[idx])
 
     @staticmethod
     def _vang(v: np.ndarray) -> float:
@@ -362,7 +370,7 @@ class SO101Simulator:
             pos  = self.raw_positions[i]
             dtix = int(round(float(pos)))
             if i == 3:
-                dtix = degrees_to_ticks(jdisp[3], self.range_min[i], self.range_max[i])
+                dtix = degrees_to_ticks(jdisp[3], self.range_min[i], self.range_max[i], name)
             flag   = " !" if (pos < self.range_min[i] or pos > self.range_max[i]) else "  "
             marker = " ◀" if i == self.selected_joint else ""
             lines.append(

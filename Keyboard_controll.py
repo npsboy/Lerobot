@@ -115,11 +115,20 @@ def set_joint_angles(
 	bus.sync_write("Goal_Position", goal_pos, normalize=False)
 	return {joint: int(pos) for joint, pos in goal_pos.items()}
 
-def degrees_to_ticks(degrees: float, min_range: float, max_range: float) -> int:
-	return int(round(degrees * 10 + min_range))
+MIN_DEGREE_OFFSETS = {
+    "shoulder_pan": 0.0,
+    "shoulder_lift": -10.0,
+    "elbow_flex": -10.0,
+    "wrist_flex": 80.0,
+}
 
-def ticks_to_degrees(ticks: int, min_range: float, max_range: float) -> float:
-    return (ticks - min_range) / 10.0
+def degrees_to_ticks(degrees: float, min_range: float, max_range: float, joint_name: str = "") -> int:
+    offset = MIN_DEGREE_OFFSETS.get(joint_name, 0.0)
+    return int(round((degrees - offset) * 10 + min_range))
+
+def ticks_to_degrees(ticks: int, min_range: float, max_range: float, joint_name: str = "") -> float:
+    offset = MIN_DEGREE_OFFSETS.get(joint_name, 0.0)
+    return (ticks - min_range) / 10.0 + offset
 
 def example_usage_so101_com6() -> None:
 	"""Example usage for an SO101 follower connected on COM6."""
@@ -218,7 +227,7 @@ def keyboard_control_shoulder_pan_so101_com6(step_ticks: int = 20) -> None:
 						max_relative_target=step_ticks,
 				)
 				print(
-					f"{label}: shoulder_pan {shoulder_pan} -> {sent['shoulder_pan']} ticks or {ticks_to_degrees(sent['shoulder_pan'], robot.bus.calibration['shoulder_pan'].range_min, robot.bus.calibration['shoulder_pan'].range_max):.1f} degrees"
+					f"{label}: shoulder_pan {shoulder_pan} -> {sent['shoulder_pan']} ticks or {ticks_to_degrees(sent['shoulder_pan'], robot.bus.calibration['shoulder_pan'].range_min, robot.bus.calibration['shoulder_pan'].range_max, 'shoulder_pan'):.1f} degrees"
 				)
 	finally:
 		robot.disconnect()
