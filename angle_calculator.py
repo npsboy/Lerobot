@@ -108,11 +108,9 @@ def calculate_angles(x, y, z, link_lengths, pole_y=0, pole_z=0):
     """
 
     # Apply offsets to target coordinates before calculations
-    y -= 14
-    z -= 11
-
+    z -= 10
     # The extension of the arm in the 3D plane is the hypotenuse of x and y
-    extension = math.hypot(x, y)
+    extension = math.hypot(x, y) - 14
     end_effector = Vector2D(extension, z)
     pole = Vector2D(pole_y, pole_z)
     
