@@ -107,6 +107,10 @@ def calculate_angles(x, y, z, link_lengths, pole_y=0, pole_z=0):
     :return: Dictionary containing the joint angles in degrees (relative to the previous link).
     """
 
+    # Apply offsets to target coordinates before calculations
+    y -= 14
+    z -= 11
+
     # The extension of the arm in the 3D plane is the hypotenuse of x and y
     extension = math.hypot(x, y)
     end_effector = Vector2D(extension, z)
