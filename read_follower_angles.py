@@ -5,8 +5,8 @@ from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 MIN_DEGREE_OFFSETS = {
     "shoulder_pan": 0.0,
     "shoulder_lift": -10.0,
-    "elbow_flex": -10.0,
-    "wrist_flex": 80.0,
+    "elbow_flex": -20.0,
+    "wrist_flex": -110,
 }
 
 def read_all_joint_angles(robot):

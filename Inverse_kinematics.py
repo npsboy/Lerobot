@@ -9,8 +9,8 @@ LINK_LENGTHS = [11.5, 13.5, 16]
 MIN_DEGREE_OFFSETS = {
     "shoulder_pan": 0.0,
     "shoulder_lift": -10.0,
-    "elbow_flex": -10.0,
-    "wrist_flex": 80.0,
+    "elbow_flex": -20.0,
+    "wrist_flex": -110,
 }
 
 # User-provided conversion functions
@@ -48,16 +48,6 @@ def _angles_to_target_positions(angles: dict, calib_data: dict) -> dict:
             # Clamp within safety limits from calibration.
             safe_ticks = enforce_limits(ticks, joint, calib_data)
             target_positions[joint] = safe_ticks
-
-    # Keep remaining joints stable to avoid large posture changes.
-    if "wrist_roll" in calib_data:
-        target_positions["wrist_roll"] = enforce_limits(
-            calib_data["wrist_roll"]["homing_offset"], "wrist_roll", calib_data
-        )
-    if "gripper" in calib_data:
-        target_positions["gripper"] = enforce_limits(
-            calib_data["gripper"]["homing_offset"], "gripper", calib_data
-        )
 
     return target_positions
 
@@ -114,18 +104,26 @@ def main():
         id="my_follower_arm",
     )
     robot = SO101Follower(config)
+    is_robot_connected = False
 
     print("Connecting to the SO101 Follower Arm on COM6...")
     try:
         # Connecting without requiring a new calibration cycle
         robot.connect(calibrate=False)
+        is_robot_connected = True
     except Exception as e:
-        print(f"Failed to connect to the robot on COM6: {e}")
-        return
+        print(f"Bot is not connected on USB (COM6): {e}")
+        print("Continuing in calculation-only mode. Coordinates, values, and ticks will still be shown.")
 
     try:
         print("\n--- Automatic IK Goal Positioning ---")
-        last_target_positions = None
+        
+        # Read current positions so the first move is smooth
+        if is_robot_connected and hasattr(robot, "bus"):
+            last_target_positions = robot.bus.sync_read("Present_Position", normalize=False)
+            last_target_positions = {k: int(v) for k, v in last_target_positions.items()}
+        else:
+            last_target_positions = None
         
         while True:
             # 3. Prompt user for coordinates
@@ -137,18 +135,27 @@ def main():
                 print("Invalid coordinates. Must be numeric floats based on link length scale.")
                 continue
 
+            print(f"Entered coordinates -> X: {x}, Y: {y}, Z: {z}")
+
             print(f"\nCalculating IK mapped angles for coords ({x}, {y}, {z}) ...")
             angles = calculate_angles(x, y, z, LINK_LENGTHS, 10, 30)
             print(f"Calculated Joint Angles (degrees):\n{angles}")
 
             target_positions = _angles_to_target_positions(angles, calib_data)
-            _send_positions(robot, target_positions, angles, last_target_positions)
-            last_target_positions = target_positions
+            print(f"Calculated Joint Ticks:\n{target_positions}")
+
+            if is_robot_connected:
+                _send_positions(robot, target_positions, angles, last_target_positions)
+                last_target_positions = target_positions
+            else:
+                print("Bot is not connected. Skipping motor command send.")
 
             print("Position held. Ready for new coordinates.\n")
 
-    except:
-        print("program stopped")
+    except KeyboardInterrupt:
+        print("Program stopped by user.")
+    except Exception as e:
+        print(f"Program stopped due to error: {e}")
 
 if __name__ == "__main__":
     main()

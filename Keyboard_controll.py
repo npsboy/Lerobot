@@ -162,8 +162,6 @@ def example_usage_so101_com6() -> None:
 			"shoulder_lift": current["shoulder_lift"] + 30,
 			"elbow_flex": current["elbow_flex"] - 40,
 			"wrist_flex": current["wrist_flex"],
-			"wrist_roll": current["wrist_roll"],
-			"gripper": current["gripper"],
 		}
 
 		sent = set_joint_angles(robot, target, max_relative_target=80)
