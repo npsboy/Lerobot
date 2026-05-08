@@ -49,3 +49,5 @@ wandb/
 
 recording.json
 imitation_learning_recordings.json
+
+preprocessed_data.json
