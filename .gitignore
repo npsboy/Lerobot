@@ -48,3 +48,4 @@ data/
 wandb/
 
 recording.json
+imitation_learning_recordings.json
