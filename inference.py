@@ -31,6 +31,13 @@ def main():
     sample_input = torch.tensor(X[args.sample], dtype=torch.float32).unsqueeze(0)
     actual_output = torch.tensor(Y[args.sample], dtype=torch.float32).unsqueeze(0)
 
+    expected_input_dim = model[0].in_features
+    if sample_input.shape[1] != expected_input_dim:
+        print(
+            f"Error: sample width {sample_input.shape[1]} does not match model input_dim {expected_input_dim}"
+        )
+        return
+
     with torch.no_grad():  # Disable gradient computation for inference
         predicted_output = model(sample_input)
 
@@ -50,6 +57,12 @@ def main():
     batch_size = min(10, len(X))
     batch_input = torch.tensor([X[i] for i in range(batch_size)], dtype=torch.float32)
     batch_actual = torch.tensor([Y[i] for i in range(batch_size)], dtype=torch.float32)
+
+    if batch_input.shape[1] != expected_input_dim:
+        print(
+            f"Error: batch width {batch_input.shape[1]} does not match model input_dim {expected_input_dim}"
+        )
+        return
 
     with torch.no_grad():
         batch_pred = model(batch_input)

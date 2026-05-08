@@ -23,22 +23,27 @@ def load_model(path: str = "model.pth") -> nn.Module:
         raise FileNotFoundError(f"Model checkpoint not found: {path}")
     
     checkpoint = torch.load(path, weights_only=False)
+    metadata = checkpoint.get("metadata", {})
+    input_dim = metadata.get("input_dim")
+    if input_dim is None:
+        input_dim = checkpoint["model_state_dict"]["0.weight"].shape[1]
     
     # reconstruct model (must match architecture in main)
     model = nn.Sequential(
-        nn.Linear(126, 128),
+        nn.Linear(input_dim, 128),
         nn.ReLU(),
         nn.Linear(128, 6)
     )
     model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"Model loaded from {path}")
+    output_dim = model[2].out_features
+    print(f"Model loaded from {path} (input_dim={input_dim}, output_dim={output_dim})")
     return model
 
 
-def create_model() -> nn.Module:
+def create_model(input_dim: int) -> nn.Module:
     """Create a fresh model."""
     return nn.Sequential(
-        nn.Linear(126, 128),
+        nn.Linear(input_dim, 128),
         nn.ReLU(),
         nn.Linear(128, 6)
     )
@@ -58,11 +63,23 @@ def main():
     X = data["X"]
     Y = data["Y"]
 
+    if not X:
+        raise ValueError("No training samples found in preprocessed_data.json")
+
+    input_dim = len(X[0])
+    if any(len(sample) != input_dim for sample in X):
+        raise ValueError("Inconsistent input widths found in X")
+
     # Load or create model
     if args.load_model:
         model = load_model(args.load_model)
+        expected_input_dim = model[0].in_features
+        if expected_input_dim != input_dim:
+            raise ValueError(
+                f"Checkpoint input_dim={expected_input_dim} does not match data input_dim={input_dim}"
+            )
     else:
-        model = create_model()
+        model = create_model(input_dim)
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = nn.MSELoss()
@@ -70,6 +87,7 @@ def main():
     epochs = args.epochs
 
     print(model)
+    print(f"Model dimensions: input_dim={model[0].in_features}, output_dim={model[2].out_features}")
 
     sample = X[0]
     sample = torch.tensor(sample, dtype=torch.float32).unsqueeze(0)  # add batch dimension
@@ -115,7 +133,7 @@ def main():
             last_save_time = current_time
 
     # Save final model
-    save_model(model, args.save_model, {"epochs_trained": epochs, "final_loss": avg_loss})
+    save_model(model, args.save_model, {"epochs_trained": epochs, "final_loss": avg_loss, "input_dim": input_dim})
     
     # Clean up all intermediate checkpoints
     print("\nCleaning up intermediate checkpoints...")
