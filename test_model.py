@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, List
 
 import torch
-
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 
 from Keyboard_controll import read_all_joint_angles, set_joint_angles
@@ -99,16 +98,40 @@ def _build_sample(frames: List[dict[str, List[float]]], target_pos: List[int], e
     )
 
 
+def _normalize_sample(sample: List[float], mean: List[float] | None, std: List[float] | None) -> List[float]:
+    if mean is None or std is None:
+        return sample
+    if len(mean) != len(sample) or len(std) != len(sample):
+        return sample
+    normalized: List[float] = []
+    for i in range(len(sample)):
+        denom = std[i] if std[i] != 0 else 1.0
+        normalized.append((sample[i] - mean[i]) / denom)
+    return normalized
+
+
 def _predict_delta(
     model: torch.nn.Module,
     frames: List[dict[str, List[float]]],
     target_pos: List[int],
     expected_input_dim: int,
+    X_mean: List[float] | None = None,
+    X_std: List[float] | None = None,
+    Y_mean: List[float] | None = None,
+    Y_std: List[float] | None = None,
 ) -> List[float]:
     sample = _build_sample(frames, target_pos, expected_input_dim)
+    sample = _normalize_sample(sample, X_mean, X_std)
     tensor = torch.tensor(sample, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         output = model(tensor).squeeze(0)
+    
+    # Denormalize output if statistics are available
+    if Y_mean is not None and Y_std is not None:
+        Y_mean_tensor = torch.tensor(Y_mean, dtype=torch.float32)
+        Y_std_tensor = torch.tensor(Y_std, dtype=torch.float32)
+        output = output * Y_std_tensor + Y_mean_tensor
+    
     return [float(v) for v in output.tolist()]
 
 
@@ -196,6 +219,15 @@ def main() -> None:
     model.eval()
     expected_input_dim = model[0].in_features
     expected_output_dim = model[2].out_features
+    
+    # Load normalization statistics from model metadata
+    checkpoint = torch.load(args.model, weights_only=False)
+    metadata = checkpoint.get("metadata", {})
+    X_mean = metadata.get("X_mean")
+    X_std = metadata.get("X_std")
+    Y_mean = metadata.get("Y_mean")
+    Y_std = metadata.get("Y_std")
+    
     print(
         f"Model dimensions: input_dim={expected_input_dim}, output_dim={expected_output_dim}"
     )
@@ -221,7 +253,7 @@ def main() -> None:
     try:
         print("Sending first model-driven command (slow mode)...")
         current_pos = _dict_to_list(read_all_joint_angles(follower))
-        delta = _predict_delta(model, leader_frames, target_pos, expected_input_dim)
+        delta = _predict_delta(model, leader_frames, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
         next_pos = []
         for i in range(len(current_pos)):
             desired = current_pos[i] + delta[i] + residual[i]
@@ -263,7 +295,7 @@ def main() -> None:
             if prediction_frames is leader_frames:
                 print("Using recorded leader frames until follower history reaches 10 frames.")
 
-            delta = _predict_delta(model, prediction_frames, target_pos, expected_input_dim)
+            delta = _predict_delta(model, prediction_frames, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
             delta = [d * 5 for d in delta]  # Scale up prediction
             
             next_pos = []

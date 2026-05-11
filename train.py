@@ -62,6 +62,11 @@ def main():
         data = json.load(f)
     X = data["X"]
     Y = data["Y"]
+    # Load normalization statistics
+    X_mean = data.get("X_mean")
+    X_std = data.get("X_std")
+    Y_mean = data.get("Y_mean")
+    Y_std = data.get("Y_std")
 
     if not X:
         raise ValueError("No training samples found in preprocessed_data.json")
@@ -128,12 +133,28 @@ def main():
             
             # Save new checkpoint
             ckpt_path = str(Path(args.save_model).stem) + f"_epoch{epoch+1}.pth"
-            save_model(model, ckpt_path, {"epoch": epoch+1, "loss": avg_loss})
+            save_model(model, ckpt_path, {
+                "epoch": epoch+1,
+                "loss": avg_loss,
+                "input_dim": input_dim,
+                "X_mean": X_mean,
+                "X_std": X_std,
+                "Y_mean": Y_mean,
+                "Y_std": Y_std
+            })
             last_checkpoint = ckpt_path
             last_save_time = current_time
 
     # Save final model
-    save_model(model, args.save_model, {"epochs_trained": epochs, "final_loss": avg_loss, "input_dim": input_dim})
+    save_model(model, args.save_model, {
+        "epochs_trained": epochs,
+        "final_loss": avg_loss,
+        "input_dim": input_dim,
+        "X_mean": X_mean,
+        "X_std": X_std,
+        "Y_mean": Y_mean,
+        "Y_std": Y_std
+    })
     
     # Clean up all intermediate checkpoints
     print("\nCleaning up intermediate checkpoints...")

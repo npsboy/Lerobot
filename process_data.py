@@ -3,7 +3,11 @@
 Creates `preprocessed_data.json` with structure:
 {
     "X": [ [...], ... ],
-    "Y": [ [...], ... ]
+    "Y": [ [...], ... ],
+    "X_mean": [...],
+    "X_std": [...],
+    "Y_mean": [...],
+    "Y_std": [...]
 }
 
 Each input sample uses a 10-frame window:
@@ -13,6 +17,9 @@ Each input sample uses a 10-frame window:
 Total input width: 10 * (6 + 6 + 6) + 6 = 186
 
 Output Y is the delta positions between next frame and current frame (6 values).
+
+Data is normalized using z-score normalization (standardization):
+normalized = (value - mean) / std_dev
 """
 from __future__ import annotations
 
@@ -20,6 +27,8 @@ import argparse
 import json
 from pathlib import Path
 from typing import List
+
+import numpy as np
 
 
 WINDOW_SIZE = 10
@@ -76,7 +85,30 @@ def process(input_path: str = "imitation_learning_recordings.json",
             X.append(sample)
             Y.append(delta)
 
-    out.write_text(json.dumps({"X": X, "Y": Y}, indent=2))
+    # Normalize X and Y using z-score normalization (standardization)
+    X_arr = np.array(X, dtype=np.float32)
+    Y_arr = np.array(Y, dtype=np.float32)
+
+    X_mean = X_arr.mean(axis=0)
+    X_std = X_arr.std(axis=0)
+    # Avoid division by zero: add a small epsilon
+    X_std = np.where(X_std == 0, 1.0, X_std)
+    X_normalized = (X_arr - X_mean) / X_std
+
+    Y_mean = Y_arr.mean(axis=0)
+    Y_std = Y_arr.std(axis=0)
+    # Avoid division by zero: add a small epsilon
+    Y_std = np.where(Y_std == 0, 1.0, Y_std)
+    Y_normalized = (Y_arr - Y_mean) / Y_std
+
+    out.write_text(json.dumps({
+        "X": X_normalized.tolist(),
+        "Y": Y_normalized.tolist(),
+        "X_mean": X_mean.tolist(),
+        "X_std": X_std.tolist(),
+        "Y_mean": Y_mean.tolist(),
+        "Y_std": Y_std.tolist()
+    }, indent=2))
     return {"X_len": len(X), "Y_len": len(Y), "out": str(out)}
 
 
