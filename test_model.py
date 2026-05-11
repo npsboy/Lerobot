@@ -22,6 +22,8 @@ JOINT_ORDER = [
     "gripper",
 ]
 
+TARGET_STOP_TOLERANCE = 10
+
 
 def _dict_to_list(pos_dict: dict[str, int]) -> List[int]:
     return [int(pos_dict.get(joint, 0)) for joint in JOINT_ORDER]
@@ -179,6 +181,10 @@ def _clamp_and_log_targets(targets: dict[str, int], calib: dict) -> dict[str, in
     return out
 
 
+def _all_joints_within_tolerance(predicted: List[int], target: List[int], tolerance: int) -> bool:
+    return all(abs(predicted[i] - target[i]) <= tolerance for i in range(len(JOINT_ORDER)))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run trained model to drive follower arm")
     parser.add_argument("--model", type=str, default="my_model.pth", help="Path to model checkpoint")
@@ -260,6 +266,12 @@ def main() -> None:
             desired_int = int(round(desired))
             residual[i] = desired - desired_int
             next_pos.append(desired_int)
+
+        if _all_joints_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
+            print(
+                f"Predicted position is within +/- {TARGET_STOP_TOLERANCE} ticks of the target on all joints. Stopping."
+            )
+            return
             
         try:
             tgt = _list_to_dict(next_pos)
@@ -304,6 +316,12 @@ def main() -> None:
                 desired_int = int(round(desired))
                 residual[i] = desired - desired_int
                 next_pos.append(desired_int)
+
+            if _all_joints_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
+                print(
+                    f"Predicted position is within +/- {TARGET_STOP_TOLERANCE} ticks of the target on all joints. Stopping."
+                )
+                break
                 
             try:
                 tgt = _list_to_dict(next_pos)
