@@ -35,14 +35,34 @@ def main():
         print(f"Error: sample index {args.sample} out of range (max {len(X)-1})")
         return
 
+    expected_input_dim = 3
+    expected_output_dim = 1
+
     # Make prediction
     sample_input = torch.tensor(X[args.sample], dtype=torch.float32).unsqueeze(0)
     actual_output = torch.tensor(Y[args.sample], dtype=torch.float32).unsqueeze(0)
 
-    expected_input_dim = model[0].in_features
     if sample_input.shape[1] != expected_input_dim:
         print(
-            f"Error: sample width {sample_input.shape[1]} does not match model input_dim {expected_input_dim}"
+            f"Error: sample width {sample_input.shape[1]} does not match expected input_dim {expected_input_dim}"
+        )
+        return
+
+    model_input_dim = model[0].in_features
+    if sample_input.shape[1] != model_input_dim:
+        print(
+            f"Error: sample width {sample_input.shape[1]} does not match model input_dim {model_input_dim}"
+        )
+        return
+    model_output_dim = model[2].out_features
+    if actual_output.shape[1] != expected_output_dim:
+        print(
+            f"Error: sample label width {actual_output.shape[1]} does not match expected output_dim {expected_output_dim}"
+        )
+        return
+    if model_output_dim != expected_output_dim:
+        print(
+            f"Error: model output_dim {model_output_dim} does not match expected output_dim {expected_output_dim}"
         )
         return
 
@@ -60,10 +80,10 @@ def main():
 
     # Display results
     print(f"\n--- Sample {args.sample} ---")
-    print(f"Predicted delta positions (normalized): {predicted_output.squeeze().tolist()}")
-    print(f"Predicted delta positions (original):   {predicted_denorm.squeeze().tolist()}")
-    print(f"Actual delta positions (normalized):    {actual_output.squeeze().tolist()}")
-    print(f"Actual delta positions (original):      {actual_denorm.squeeze().tolist()}")
+    print(f"Predicted deltas (normalized): {predicted_output.squeeze().tolist()}")
+    print(f"Predicted deltas (original):   {predicted_denorm.squeeze().tolist()}")
+    print(f"Actual deltas (normalized):    {actual_output.squeeze().tolist()}")
+    print(f"Actual deltas (original):      {actual_denorm.squeeze().tolist()}")
 
     # Calculate error on normalized data
     mse = torch.nn.functional.mse_loss(predicted_output, actual_output)
@@ -83,7 +103,13 @@ def main():
 
     if batch_input.shape[1] != expected_input_dim:
         print(
-            f"Error: batch width {batch_input.shape[1]} does not match model input_dim {expected_input_dim}"
+            f"Error: batch width {batch_input.shape[1]} does not match expected input_dim {expected_input_dim}"
+        )
+        return
+
+    if batch_input.shape[1] != model_input_dim:
+        print(
+            f"Error: batch width {batch_input.shape[1]} does not match model input_dim {model_input_dim}"
         )
         return
 

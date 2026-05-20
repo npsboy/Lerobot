@@ -1,6 +1,6 @@
 """Record multiple sequences of leader arm movements.
 
-Records from leader arm on COM5 and stores recordings as a JSON array in
+Records from leader arm on COM7 and stores recordings as a JSON array in
 imitation_learning_recordings.json. Only reads joint positions, doesn't send motor commands.
 
 Usage:
@@ -64,8 +64,6 @@ def record_single_sequence(leader: Any, sequence_num: int, hz: float = 20.0) -> 
 	input_thread = threading.Thread(target=wait_for_enter, daemon=True)
 	input_thread.start()
 	
-	previous_pos = None
-	
 	try:
 		while not stop_recording:
 			ts = time.time() - start_t
@@ -75,18 +73,10 @@ def record_single_sequence(leader: Any, sequence_num: int, hz: float = 20.0) -> 
 			# Define the expected joint order
 			joint_order = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 			pos_array = [pos_dict.get(joint, 0) for joint in joint_order]
-			
-			# Calculate velocities from previous frame
-			velocities = None
-			if previous_pos is not None:
-				velocities = [(pos_array[i] - previous_pos[i]) / period for i in range(len(pos_array))]
-			
+
 			frame = {"t": ts, "positions": pos_array}
-			if velocities is not None:
-				frame["velocities"] = velocities
 			
 			frames.append(frame)
-			previous_pos = pos_array
 			time.sleep(period)
 	except KeyboardInterrupt:
 		print("\nRecording stopped by user (Ctrl+C).")
@@ -137,7 +127,7 @@ def save_recordings(data: list[dict[str, Any]], file_path: Path) -> None:
 
 
 def main() -> None:
-	leader_port = "COM5"
+	leader_port = "COM7"
 	hz = 20.0
 	out_path = Path("imitation_learning_recordings.json")
 	

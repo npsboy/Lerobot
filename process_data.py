@@ -2,21 +2,21 @@
 
 Creates `preprocessed_data.json` with structure:
 {
-    "X": [ [...], ... ],
-    "Y": [ [...], ... ],
-    "X_mean": [...],
-    "X_std": [...],
-    "Y_mean": [...],
-    "Y_std": [...]
+        "X": [ [...], ... ],
+        "Y": [ [...], ... ],
+        "X_mean": [...],
+        "X_std": [...],
+        "Y_mean": [...],
+        "Y_std": [...]
 }
 
-Each input sample uses a 10-frame window:
-- For each of 10 frames: 6 ticks + 6 velocities + 6 signed errors vs target
-- Plus 6 target ticks appended at the end
-
-Total input width: 10 * (6 + 6 + 6) + 6 = 186
-
-Output Y is the delta positions between next frame and current frame (6 values).
+Shoulder-pan-only setup:
+- X has 3 values per sample:
+    1) current shoulder_pan angle
+    2) target shoulder_pan angle
+    3) error = target - current
+- Y has 1 value per sample:
+    - shoulder_pan delta to next frame
 
 Data is normalized using z-score normalization (standardization):
 normalized = (value - mean) / std_dev
@@ -31,7 +31,9 @@ from typing import List
 import numpy as np
 
 
-WINDOW_SIZE = 10
+JOINT_INDICES = [1]
+INPUT_WIDTH = 3
+OUTPUT_WIDTH = 1
 
 
 def _ensure_len(arr: List[float], n: int) -> List[float]:
@@ -61,31 +63,44 @@ def process(input_path: str = "imitation_learning_recordings.json",
             # skip sessions without a known target
             continue
 
-        n = len(frames)
         target_pos_6 = _ensure_len(target_pos, 6)
-        # Use sliding windows [t, t+WINDOW_SIZE-1], predict delta at t+WINDOW_SIZE.
-        for t in range(0, n - WINDOW_SIZE):
+        # Use the second joint (shoulder_lift) only
+        target_vals = [float(target_pos_6[i]) for i in JOINT_INDICES]
+        n = len(frames)
+        # Use each frame as a separate sample, predict delta to the next frame.
+        for t in range(0, n - 1):
+            frame = frames[t]
+            curr_pos = _ensure_len(frame.get("positions"), 6)
+            # Build features (current, target, error) for the selected joint
             sample: List[float] = []
+            for i, tgt in zip(JOINT_INDICES, target_vals):
+                cur = float(curr_pos[i])
+                sample.append(cur)
+                sample.append(float(tgt))
+                sample.append(float(tgt - cur))
+            if len(sample) != INPUT_WIDTH:
+                raise ValueError(
+                    f"Built sample width {len(sample)} does not match expected input width {INPUT_WIDTH}"
+                )
 
-            for k in range(t, t + WINDOW_SIZE):
-                frame = frames[k]
-                curr_pos = _ensure_len(frame.get("positions"), 6)
-                curr_vel = _ensure_len(frame.get("velocities"), 6)
-                sample.extend(curr_pos)
-                sample.extend(curr_vel)
-                sample.extend([curr_pos[i] - target_pos_6[i] for i in range(6)])
-
-            sample.extend(target_pos_6)
-
-            # predict one-step-ahead delta after the window end
-            last_pos = _ensure_len(frames[t + WINDOW_SIZE - 1].get("positions"), 6)
-            next_pos = _ensure_len(frames[t + WINDOW_SIZE].get("positions"), 6)
-            delta = [next_pos[i] - last_pos[i] for i in range(6)]
+            # Predict one-step-ahead shoulder-pan delta from the current frame.
+            next_pos = _ensure_len(frames[t + 1].get("positions"), 6)
+            # Build delta output for the selected joint
+            delta: List[float] = []
+            for i in JOINT_INDICES:
+                delta.append(float(next_pos[i] - curr_pos[i]))
+            if len(delta) != OUTPUT_WIDTH:
+                raise ValueError(
+                    f"Built label width {len(delta)} does not match expected output width {OUTPUT_WIDTH}"
+                )
 
             X.append(sample)
             Y.append(delta)
 
     # Normalize X and Y using z-score normalization (standardization)
+    if not X:
+        raise ValueError("No valid training samples were produced from the input recordings")
+
     X_arr = np.array(X, dtype=np.float32)
     Y_arr = np.array(Y, dtype=np.float32)
 

@@ -1,6 +1,6 @@
 """Simple record / replay utility.
 
-Record: reads raw motor ticks from a leader arm on COM5 and saves a JSON file.
+Record: reads raw motor ticks from a leader arm on COM7 and saves a JSON file.
 Replay: loads JSON and sends recorded ticks to follower on COM6, preserving timing.
 
 Usage examples:
@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 	r = sub.add_parser("record")
 	r.add_argument("--out", type=Path, default=Path("recording.json"))
-	r.add_argument("--leader-port", default="COM5")
+	r.add_argument("--leader-port", default="COM7")
 	r.add_argument("--hz", type=float, default=20.0)
 
 	p2 = sub.add_parser("replay")

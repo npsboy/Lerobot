@@ -6,6 +6,10 @@ import time
 from pathlib import Path
 
 
+EXPECTED_INPUT_DIM = 3
+EXPECTED_OUTPUT_DIM = 1
+
+
 def save_model(model: nn.Module, path: str = "model.pth", metadata: dict = None):
     """Save model state_dict and optional metadata."""
     checkpoint = {
@@ -28,14 +32,15 @@ def load_model(path: str = "model.pth") -> nn.Module:
     if input_dim is None:
         input_dim = checkpoint["model_state_dict"]["0.weight"].shape[1]
     
+    output_dim = metadata.get("output_dim", EXPECTED_OUTPUT_DIM)
+
     # reconstruct model (must match architecture in main)
     model = nn.Sequential(
         nn.Linear(input_dim, 128),
         nn.ReLU(),
-        nn.Linear(128, 6)
+        nn.Linear(128, output_dim)
     )
     model.load_state_dict(checkpoint["model_state_dict"])
-    output_dim = model[2].out_features
     print(f"Model loaded from {path} (input_dim={input_dim}, output_dim={output_dim})")
     return model
 
@@ -45,7 +50,7 @@ def create_model(input_dim: int) -> nn.Module:
     return nn.Sequential(
         nn.Linear(input_dim, 128),
         nn.ReLU(),
-        nn.Linear(128, 6)
+        nn.Linear(128, EXPECTED_OUTPUT_DIM)
     )
 
 
@@ -72,8 +77,19 @@ def main():
         raise ValueError("No training samples found in preprocessed_data.json")
 
     input_dim = len(X[0])
+    if input_dim != EXPECTED_INPUT_DIM:
+        raise ValueError(
+            f"Expected input_dim={EXPECTED_INPUT_DIM}, but preprocessed_data.json contains input_dim={input_dim}. Run process_data.py again with single-joint 3-feature format."
+        )
+    output_dim = len(Y[0])
+    if output_dim != EXPECTED_OUTPUT_DIM:
+        raise ValueError(
+            f"Expected output_dim={EXPECTED_OUTPUT_DIM}, but preprocessed_data.json contains output_dim={output_dim}."
+        )
     if any(len(sample) != input_dim for sample in X):
         raise ValueError("Inconsistent input widths found in X")
+    if any(len(sample) != output_dim for sample in Y):
+        raise ValueError("Inconsistent output widths found in Y")
 
     # Load or create model
     if args.load_model:
@@ -82,6 +98,11 @@ def main():
         if expected_input_dim != input_dim:
             raise ValueError(
                 f"Checkpoint input_dim={expected_input_dim} does not match data input_dim={input_dim}"
+            )
+        expected_output_dim = model[2].out_features
+        if expected_output_dim != output_dim:
+            raise ValueError(
+                f"Checkpoint output_dim={expected_output_dim} does not match data output_dim={output_dim}"
             )
     else:
         model = create_model(input_dim)
@@ -137,6 +158,7 @@ def main():
                 "epoch": epoch+1,
                 "loss": avg_loss,
                 "input_dim": input_dim,
+                "output_dim": output_dim,
                 "X_mean": X_mean,
                 "X_std": X_std,
                 "Y_mean": Y_mean,
@@ -150,6 +172,7 @@ def main():
         "epochs_trained": epochs,
         "final_loss": avg_loss,
         "input_dim": input_dim,
+        "output_dim": output_dim,
         "X_mean": X_mean,
         "X_std": X_std,
         "Y_mean": Y_mean,

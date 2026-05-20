@@ -5,7 +5,7 @@ import argparse
 import time
 import json
 from pathlib import Path
-from typing import Any, List
+from typing import List
 
 import torch
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
@@ -22,7 +22,8 @@ JOINT_ORDER = [
     "gripper",
 ]
 
-TARGET_STOP_TOLERANCE = 10
+TARGET_STOP_TOLERANCE = 30
+JOINT_INDICES = [1]
 
 
 def _dict_to_list(pos_dict: dict[str, int]) -> List[int]:
@@ -33,71 +34,18 @@ def _list_to_dict(pos_list: List[float]) -> dict[str, int]:
     return {joint: int(round(pos_list[i])) for i, joint in enumerate(JOINT_ORDER)}
 
 
-def _compute_velocities(prev: List[int] | None, curr: List[int], dt: float) -> List[float]:
-    if prev is None or dt <= 0:
-        return [0.0] * len(curr)
-    return [(curr[i] - prev[i]) / dt for i in range(len(curr))]
-
-
-def _capture_frames(robot: Any, num_frames: int, hz: float) -> List[dict[str, List[float]]]:
-    frames: List[dict[str, List[float]]] = []
-    period = 1.0 / float(hz)
-    prev_pos: List[int] | None = None
-    for _ in range(num_frames):
-        t0 = time.time()
-        pos_dict = read_all_joint_angles(robot)
-        pos_list = _dict_to_list(pos_dict)
-        vel_list = _compute_velocities(prev_pos, pos_list, period)
-        frames.append({"positions": pos_list, "velocities": vel_list})
-        prev_pos = pos_list
-        elapsed = time.time() - t0
-        time.sleep(max(0.0, period - elapsed))
-    return frames
-
-
-def _build_sample(frames: List[dict[str, List[float]]], target_pos: List[int], expected_input_dim: int) -> List[float]:
-    # Current training data uses 18 features: curr_pos(6) + curr_vel(6) + (curr_pos-target_pos)(6)
-    if expected_input_dim == 18:
-        frame = frames[-1]
-        curr_pos = [float(v) for v in frame["positions"][:6]]
-        curr_vel = [float(v) for v in frame["velocities"][:6]]
-        target_pos_6 = [float(v) for v in target_pos[:6]]
-        sample = curr_pos + curr_vel + [curr_pos[i] - target_pos_6[i] for i in range(6)]
-        return sample
-
-    # Windowed format: 10 frames of [pos(6), vel(6), pos-target(6)] + target_pos(6) = 186
-    if expected_input_dim == 186:
-        sample: List[float] = []
-        target_pos_6 = [float(v) for v in target_pos[:6]]
-        frames_10 = frames[-10:]
-        if len(frames_10) < 10:
-            pad = [{"positions": [0.0] * 6, "velocities": [0.0] * 6}] * (10 - len(frames_10))
-            frames_10 = pad + frames_10
-        for frame in frames_10:
-            curr_pos = [float(v) for v in frame["positions"][:6]]
-            curr_vel = [float(v) for v in frame["velocities"][:6]]
-            sample.extend(curr_pos)
-            sample.extend(curr_vel)
-            sample.extend([curr_pos[i] - target_pos_6[i] for i in range(6)])
-        sample.extend(target_pos_6)
-        return sample
-
-    # Legacy format: 10-frame history with positions+velocities, then target_pos (126 features)
-    if expected_input_dim == 126:
-        sample: List[float] = []
-        frames_10 = frames[-10:]
-        if len(frames_10) < 10:
-            pad = [{"positions": [0.0] * 6, "velocities": [0.0] * 6}] * (10 - len(frames_10))
-            frames_10 = pad + frames_10
-        for frame in frames_10:
-            sample.extend([float(v) for v in frame["positions"][:6]])
-            sample.extend([float(v) for v in frame["velocities"][:6]])
-        sample.extend([float(v) for v in target_pos[:6]])
-        return sample
-
-    raise ValueError(
-        f"Unsupported model input_dim={expected_input_dim}. Expected 18, 186, or 126 (legacy)."
-    )
+def _build_sample(current_pos: List[int], target_pos: List[int], expected_input_dim: int) -> List[float]:
+    # Supports 3-feature input (1 joint x 3 features)
+    if expected_input_dim != 3:
+        raise ValueError(f"Unsupported model input_dim={expected_input_dim}. Expected 3.")
+    sample: List[float] = []
+    for i in JOINT_INDICES:
+        cur = float(current_pos[i])
+        tgt = float(target_pos[i])
+        sample.append(cur)
+        sample.append(tgt)
+        sample.append(tgt - cur)
+    return sample
 
 
 def _normalize_sample(sample: List[float], mean: List[float] | None, std: List[float] | None) -> List[float]:
@@ -114,7 +62,7 @@ def _normalize_sample(sample: List[float], mean: List[float] | None, std: List[f
 
 def _predict_delta(
     model: torch.nn.Module,
-    frames: List[dict[str, List[float]]],
+    current_pos: List[int],
     target_pos: List[int],
     expected_input_dim: int,
     X_mean: List[float] | None = None,
@@ -122,19 +70,23 @@ def _predict_delta(
     Y_mean: List[float] | None = None,
     Y_std: List[float] | None = None,
 ) -> List[float]:
-    sample = _build_sample(frames, target_pos, expected_input_dim)
+    sample = _build_sample(current_pos, target_pos, expected_input_dim)
     sample = _normalize_sample(sample, X_mean, X_std)
     tensor = torch.tensor(sample, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         output = model(tensor).squeeze(0)
-    
+
     # Denormalize output if statistics are available
     if Y_mean is not None and Y_std is not None:
         Y_mean_tensor = torch.tensor(Y_mean, dtype=torch.float32)
         Y_std_tensor = torch.tensor(Y_std, dtype=torch.float32)
         output = output * Y_std_tensor + Y_mean_tensor
-    
-    return [float(v) for v in output.tolist()]
+
+    vals = output.squeeze().tolist()
+    # `tolist()` returns a float for single-element tensors, handle both cases
+    if isinstance(vals, (float, int)):
+        return [float(vals)]
+    return [float(x) for x in vals]
 
 
 def _connect_robot(port: str, robot_id: str, *, disable_torque: bool) -> SO101Follower:
@@ -181,17 +133,20 @@ def _clamp_and_log_targets(targets: dict[str, int], calib: dict) -> dict[str, in
     return out
 
 
-def _all_joints_within_tolerance(predicted: List[int], target: List[int], tolerance: int) -> bool:
-    return all(abs(predicted[i] - target[i]) <= tolerance for i in range(len(JOINT_ORDER)))
+def _shoulder_pan_within_tolerance(predicted: List[int], target: List[int], tolerance: int) -> bool:
+    # Return True when all monitored joints are within tolerance of the target
+    for i in JOINT_INDICES:
+        if abs(predicted[i] - target[i]) > tolerance:
+            return False
+    return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run trained model to drive follower arm")
     parser.add_argument("--model", type=str, default="my_model.pth", help="Path to model checkpoint")
-    parser.add_argument("--leader-port", type=str, default="COM5")
+    parser.add_argument("--leader-port", type=str, default="COM7")
     parser.add_argument("--follower-port", type=str, default="COM6")
     parser.add_argument("--calib", type=str, default=r"C:\Users\Tusha\.cache\huggingface\lerobot\calibration\robots\so_follower\my_follower_arm.json", help="Path to follower calibration JSON")
-    parser.add_argument("--record-hz", type=float, default=20.0, help="Hz for initial leader recording")
     parser.add_argument("--loop-hz", type=float, default=2.0, help="Hz for slow follower updates")
     parser.add_argument("--max-relative-target", type=float, default=20.0, help="Max per-step ticks change")
     args = parser.parse_args()
@@ -204,10 +159,6 @@ def main() -> None:
         return
 
     try:
-        input("Press Enter to record the first 10 frames from the leader...")
-        leader_frames = _capture_frames(leader, 10, args.record_hz)
-        print("Captured 10 frames.")
-
         input("Move leader to target position, then press Enter...")
         target_pos = _dict_to_list(read_all_joint_angles(leader))
         print(f"Target ticks recorded: {target_pos}")
@@ -225,6 +176,11 @@ def main() -> None:
     model.eval()
     expected_input_dim = model[0].in_features
     expected_output_dim = model[2].out_features
+    if expected_input_dim != 3 or expected_output_dim != 1:
+        print(
+            f"Unsupported model dimensions: input_dim={expected_input_dim}, output_dim={expected_output_dim}. Expected 3->1."
+        )
+        return
     
     # Load normalization statistics from model metadata
     checkpoint = torch.load(args.model, weights_only=False)
@@ -249,27 +205,23 @@ def main() -> None:
     calib = _load_calibration(args.calib)
 
     loop_period = 1.0 / float(args.loop_hz)
-    follower_frames: List[dict[str, List[float]]] = []
-    prev_pos: List[int] | None = None
-    prev_t = time.time()
-    
-    # Residual accumulator to resolve integer truncation for small deltas
-    residual = [0.0] * len(JOINT_ORDER)
+    # Residual accumulator to resolve integer truncation for small deltas.
+    residual = [0.0 for _ in JOINT_INDICES]
 
     try:
         print("Sending first model-driven command (slow mode)...")
         current_pos = _dict_to_list(read_all_joint_angles(follower))
-        delta = _predict_delta(model, leader_frames, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
-        next_pos = []
-        for i in range(len(current_pos)):
-            desired = current_pos[i] + delta[i] + residual[i]
+        deltas = _predict_delta(model, current_pos, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
+        next_pos = list(current_pos)
+        for idx_i, joint_idx in enumerate(JOINT_INDICES):
+            desired = current_pos[joint_idx] + deltas[idx_i] + residual[idx_i]
             desired_int = int(round(desired))
-            residual[i] = desired - desired_int
-            next_pos.append(desired_int)
+            residual[idx_i] = desired - desired_int
+            next_pos[joint_idx] = desired_int
 
-        if _all_joints_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
+        if _shoulder_pan_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
             print(
-                f"Predicted position is within +/- {TARGET_STOP_TOLERANCE} ticks of the target on all joints. Stopping."
+                f"Predicted joints are within +/- {TARGET_STOP_TOLERANCE} ticks of target. Stopping."
             )
             return
             
@@ -289,37 +241,18 @@ def main() -> None:
 
         print("Running continuous slow updates. Press Ctrl+C to stop.")
         while True:
-            now = time.time()
-            dt = max(1e-6, now - prev_t)
-            prev_t = now
-
             pos = _dict_to_list(read_all_joint_angles(follower))
-            # Use the training hz to compute velocity so the model sees familiar velocity scale
-            fake_dt = 1.0 / args.record_hz 
-            vel = _compute_velocities(prev_pos, pos, fake_dt)
-            
-            follower_frames.append({"positions": pos, "velocities": vel})
-            if len(follower_frames) > 10:
-                follower_frames.pop(0)
-            prev_pos = pos
-
-            prediction_frames = follower_frames if len(follower_frames) >= 10 else leader_frames
-            if prediction_frames is leader_frames:
-                print("Using recorded leader frames until follower history reaches 10 frames.")
-
-            delta = _predict_delta(model, prediction_frames, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
-            delta = [d * 5 for d in delta]  # Scale up prediction
-            
-            next_pos = []
-            for i in range(len(pos)):
-                desired = pos[i] + delta[i] + residual[i]
+            deltas = _predict_delta(model, pos, target_pos, expected_input_dim, X_mean, X_std, Y_mean, Y_std)
+            next_pos = list(pos)
+            for idx_i, joint_idx in enumerate(JOINT_INDICES):
+                desired = pos[joint_idx] + deltas[idx_i] + residual[idx_i]
                 desired_int = int(round(desired))
-                residual[i] = desired - desired_int
-                next_pos.append(desired_int)
+                residual[idx_i] = desired - desired_int
+                next_pos[joint_idx] = desired_int
 
-            if _all_joints_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
+            if _shoulder_pan_within_tolerance(next_pos, target_pos, TARGET_STOP_TOLERANCE):
                 print(
-                    f"Predicted position is within +/- {TARGET_STOP_TOLERANCE} ticks of the target on all joints. Stopping."
+                    f"Predicted joints are within +/- {TARGET_STOP_TOLERANCE} ticks of target. Stopping."
                 )
                 break
                 
